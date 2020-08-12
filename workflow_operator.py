@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 #     def execute(self, context):
 #         log.info("Hello World!")
-#         log.info('operator_param: %s', self.operator_param)
+#         log.info('operator_param: %s', self.operator_param) 
 
 WORKFLOW_PROCESS = 'workflow_process'
 class WorkflowSensor(BaseSensorOperator):
