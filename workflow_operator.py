@@ -8,16 +8,16 @@ from airflow.sensors.base_sensor_operator import BaseSensorOperator
 
 log = logging.getLogger(__name__)
 
-class WorkflowOperator(BaseOperator):
+# class WorkflowOperator(BaseOperator):
 
-    @apply_defaults
-    def __init__(self, my_operator_param, *args, **kwargs):
-        self.operator_param = my_operator_param
-        super(WorkflowOperator, self).__init__(*args, **kwargs)
+#     @apply_defaults
+#     def __init__(self, my_operator_param, *args, **kwargs):
+#         self.operator_param = my_operator_param
+#         super(WorkflowOperator, self).__init__(*args, **kwargs)
 
-    def execute(self, context):
-        log.info("Hello World!")
-        log.info('operator_param: %s', self.operator_param) 
+#     def execute(self, context):
+#         log.info("Hello World!")
+#         log.info('operator_param: %s', self.operator_param) 
 
 WORKFLOW_PROCESS = 'workflow_process'
 class WorkflowSensor(BaseSensorOperator):
@@ -83,4 +83,5 @@ class WorkflowSensor(BaseSensorOperator):
 
 class WorkflowPlugin(AirflowPlugin):
     name = "workflow_plugin"
-    operators = [WorkflowOperator, WorkflowSensor]
+    # operators = [WorkflowSensor]
+    sensors = [WorkflowSensor]
