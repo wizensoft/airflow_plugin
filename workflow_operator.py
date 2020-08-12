@@ -4,7 +4,7 @@ from airflow.models import BaseOperator
 from airflow.plugins_manager import AirflowPlugin
 from airflow.utils.decorators import apply_defaults
 from airflow.hooks.mysql_hook import MySqlHook
-from airflow.sensors.base_sensor_operator import BaseSensorOperator
+from airflow.sensors.external_task_sensor import BaseSensorOperator
 
 log = logging.getLogger(__name__)
 
