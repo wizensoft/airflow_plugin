@@ -66,7 +66,7 @@ class WorkflowSensor(BaseSensorOperator):
 
         # 객체가 있는 경우 처리
         if tasks[WORKFLOW_PROCESS] != []:
-            log.info('workflow_process find data')
+            log.info('workflow_process find new data')
             context['ti'].xcom_push(key=WORKFLOW_PROCESS, value=tasks[WORKFLOW_PROCESS])
             return True
         else:
@@ -80,8 +80,3 @@ class WorkflowSensor(BaseSensorOperator):
             
         # log.info("Current minute (%s) is divisible by 3, sensor finishing.", current_minute)
         # return True
-
-class WorkflowPlugin(AirflowPlugin):
-    name = "workflow_plugin"
-    # operators = [WorkflowSensor]
-    sensors = [WorkflowSensor]
