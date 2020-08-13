@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 #         self.operator_param = my_operator_param
 #         super(WorkflowOperator, self).__init__(*args, **kwargs)
 
-#     def execute(self, context):
+#     def execute(self, context): 
 #         log.info("Hello World!")
 #         log.info('operator_param: %s', self.operator_param) 
 
