@@ -63,6 +63,12 @@ class WorkflowSensor(BaseSensorOperator):
                 'message':''
             }
             tasks[WORKFLOW_PROCESS].append(model)
+            sql = f"""
+            update workflow_process
+                set ready = 0, bookmark = 'start'
+            where workflow_process_id = %s
+            """
+            db.run(sql, autocommit=True, parameters=[row['workflow_process_id']])            
 
         # 객체가 있는 경우 처리
         if tasks[WORKFLOW_PROCESS]:
