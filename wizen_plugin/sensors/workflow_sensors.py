@@ -60,14 +60,14 @@ class WorkflowSensor(BaseSensorOperator):
                 'version':row[14],
                 'request':row[15],
                 'reserved':row[16],
-                'message':row[17]
+                'message':''
             }
             tasks[WORKFLOW_PROCESS].append(model)
 
         # 객체가 있는 경우 처리
-        if tasks[WORKFLOW_PROCESS] != []:
+        if tasks[WORKFLOW_PROCESS]:
             log.info('workflow_process find new data')
-            context['ti'].xcom_push(key=WORKFLOW_PROCESS, value=tasks[WORKFLOW_PROCESS])
+            context['ti'].xcom_push(key=WORKFLOW_PROCESS, value=tasks[WORKFLOW_PROCESS])         
             return True
         else:
             log.info('workflow_process empty data')
