@@ -6,19 +6,6 @@ from airflow.utils.decorators import apply_defaults
 from airflow.hooks.mysql_hook import MySqlHook
 from airflow.sensors.base_sensor_operator import BaseSensorOperator
 
-log = logging.getLogger(__name__)
-
-# class WorkflowOperator(BaseOperator):
-
-#     @apply_defaults
-#     def __init__(self, my_operator_param, *args, **kwargs):
-#         self.operator_param = my_operator_param
-#         super(WorkflowOperator, self).__init__(*args, **kwargs)
-
-#     def execute(self, context): 
-#         log.info("Hello World!")
-#         log.info('operator_param: %s', self.operator_param) 
-
 WORKFLOW_PROCESS = 'workflow_process'
 class WorkflowSensor(BaseSensorOperator):
 
@@ -68,15 +55,15 @@ class WorkflowSensor(BaseSensorOperator):
                 set ready = 0, bookmark = 'start'
             where workflow_process_id = %s
             """
-            db.run(sql, autocommit=True, parameters=[row[0]])            
+            db.run(sql, autocommit=True, parameters=[str(row[0])])
 
         # 객체가 있는 경우 처리
         if tasks[WORKFLOW_PROCESS]:
-            log.info('workflow_process find new data')
-            context['ti'].xcom_push(key=WORKFLOW_PROCESS, value=tasks[WORKFLOW_PROCESS])         
+            logging.info('workflow_process find new data')
+            context['ti'].xcom_push(key=WORKFLOW_PROCESS, value=tasks[WORKFLOW_PROCESS])
             return True
         else:
-            log.info('workflow_process empty data')
+            logging.info('workflow_process empty data')
             return False
 
         # current_minute = datetime.now().minute
