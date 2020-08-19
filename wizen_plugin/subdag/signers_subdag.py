@@ -24,10 +24,11 @@ def signers_subdag(parent_dag_name, child_dag_name, instances, args):
         default_args=args,
         schedule_interval=None, # 값을 넣어주어야 합니다.
     )
-    print(parent_dag_name)
-    print(child_dag_name)
-    print(instances)
-    print(args)    
+    logging.info(f'parent_dag_name: {parent_dag_name}')
+    logging.info(f'child_dag_name: {child_dag_name}')
+    logging.info(f'instances: {instances}')
+    logging.info(f'args: {args}')
+
     # for row in instances:
     #     instance_id = str(row[0])
     #     globals()['process_status'] = PythonOperator(
