@@ -1,9 +1,10 @@
 from airflow.plugins_manager import AirflowPlugin
 from wizen_plugin.sensors.workflow_sensors import WorkflowSensor
+from wizen_plugin.operators.signers_operator import SignersOperator
 
 class WizenPlugin(AirflowPlugin):
     name = "wizen_plugin"
-    operators = []
+    operators = [SignersOperator]
     sensors = [WorkflowSensor]
     hooks = []
     executors = []

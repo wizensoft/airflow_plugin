@@ -18,7 +18,7 @@ def t_subdag(parent_dag_name, child_dag_name, args):
         globals()['process_a'] = BashOperator(
             task_id='%s-task_A-%s' % (child_dag_name, i + 1),
             default_args=args,
-            bash_command='echo "does it work?"',
+            bash_command='echo "does it work? number_of_runs: "',
             dag=dag_subdag,
         )
         globals()['process_b'] = BashOperator(
