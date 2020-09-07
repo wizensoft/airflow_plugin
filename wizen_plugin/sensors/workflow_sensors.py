@@ -66,7 +66,7 @@ class WorkflowSensor(BaseSensorOperator):
             logging.info('workflow_process empty data')
             return False
 
-        # current_minute = datetime.now().minute
+        # current_minute = datetime.utcnow().minute
         # if current_minute % 3 != 0:
         #     log.info("Current minute (%s) not is divisible by 3, sensor will retry.", current_minute)
         #     return False

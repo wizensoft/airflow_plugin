@@ -25,15 +25,22 @@ SIGN_ACTION = 'sign_action'
 # 결재선 필드
 SEQ = 'sequence'
 BOX_ID = 'box_id'
+NAME = 'name'
+CULTURE = 'culture'
 USER_ID = 'user_id'
 USER_NAME = 'user_name'
+INSTANCE_ID = 'instance_id'
 GROUP_ID = 'group_id'
 GROUP_NAME = 'group_name'
 INSTANCE_ID = 'instance_id'
 SIGN_AREA_ID = 'sign_area_id'
 IS_EXECUTED = 'is_executed'
 IS_DISPLAY = 'is_display'
+IS_COMMENT = 'is_comment'
 LOCATION = 'location'
+DELAY_TIME = 'delay_time'
+CREATED_DATE ='created_date'
+HOST_ADDRESS = 'host_address'
 # 상태 정보
 STATUS_00 = '00' # 기안
 STATUS_01 = '01' # 진행중 : 결재
@@ -44,6 +51,7 @@ STATUS_05 = '05'
 # 결재함
 BOXES = 'boxes'
 BOX_04 = 4   # 개인 결재함
+BOX_09 = 9   # 개인 반려함
 BOX_10 = 10  # 개인 완료함
 BOX_13 = 13  # 부서 수신함
 BOX_15 = 15  # 품의 완료함
@@ -65,109 +73,213 @@ class SignersOperator(BaseOperator):
     결재선 & 결재함
     """
     @apply_defaults
-    def __init__(self,wf_start_task,instance_task,setting_task,*args, **kwargs):
+    def __init__(self, wf_start_task, *args, **kwargs):
 
         super(SignersOperator, self).__init__(*args, **kwargs)
         self.wf_start_task = wf_start_task
-        self.instance_task = instance_task
-        self.setting_task = setting_task
 
     def execute(self, context):
-        workflows = context['ti'].xcom_pull(task_ids=self.wf_start_task)
-        instances = context['ti'].xcom_pull(task_ids=self.instance_task)
-        settings = context['ti'].xcom_pull(task_ids=self.setting_task)
+        if self.wf_start_task == 'receive':
+            if context["dag_run"]:
+                lst = context["dag_run"].conf["workflows"]
+                # logging.info(f'lst: {lst}')
+                if lst:  
+                    workflows = json.loads(lst.replace("'","\""))
+            else:
+                logging.info(f"airflow test workflow_trigger_signers signers '2020-09-02'")
+                data = "[{'workflow_process_id': 25, 'ngen': 0, 'site_id': 1, 'application_id': 1, 'instance_id': 1, 'schema_id': 0, 'name': '기안지', 'workflow_instance_id': '1', 'state': '00', 'retry_count': 0, 'ready': 1, 'execute_date': '2020-07-28 00:00:00', 'created_date': '2020-07-28 00:00:00', 'bookmark': '', 'version': '1.0', 'request': '', 'reserved': 0, 'message': ''}]"
+                workflows = json.loads(data.replace("'","\""))
+        else:
+            workflows = context['ti'].xcom_pull(task_ids=self.wf_start_task)
+        # instances = context['ti'].xcom_pull(task_ids=self.instance_task)
+        # settings = context['ti'].xcom_pull(task_ids=self.setting_task)
         
         db = MySqlHook(mysql_conn_id='mariadb', schema="dapp")
-        if workflows[0]:
+        if workflows:
             tasks = {}
             tasks[SIGNER_TASK_ING] = []
             tasks[SIGNER_TASK_COMPLETED] = []
-            for wf in workflows[0]:
-                try:                
+            for wf in workflows:
+                try:
                     sql = []
                     workflow_process_id = wf['workflow_process_id']
                     instance_id = wf[INSTANCE_ID]
+
+                    # 기 결재선
+                    signers = get_signers(instance_id)
+                    # 이전 결재자
+                    prev_signers = []
+                    if signers[0]:
+                        index = 0
+                        sign_area_id = 1
+                        seq = 1
+                        current = {}
+                        for m in signers[0]:
+                            # 첫 결재자 정보
+                            if index == 0:
+                                current = m
+                            else:
+                                # 같은 영역에서 최종 결재자 정보 확인
+                                if current[SIGN_AREA_ID] == m[SIGN_AREA_ID]:
+                                    if m[SEQ] > seq:
+                                        seq = m[SEQ]
+                                        sign_area_id = m[SIGN_AREA_ID]
+                                else:
+                                    # 영역이 바뀌면 초기화
+                                    sign_area_id = m[SIGN_AREA_ID]
+                                    seq = 1
+                            if sign_area_id == m[SIGN_AREA_ID] and m[SEQ] == seq:
+                                prev_signers.append(m)
+                                prev_signers_time = datetime.strptime(prev_signers[0][CREATED_DATE],  '%Y-%m-%d %H:%M:%S')
+                            index += 1
+                        # logging.info(f'이전 결재자: {prev_signers}')
+
                     # activities = {}
                     # activities[CURRENT_ACTIVITY] = []
                     # 결재 예정 정보(현결재자, 다음결재자)
                     sign_activity = get_sign_activity(instance_id)
                     # 현결재자[0] 다음결재자[1] 처리
-                    activities = fn_next_activity(sign_activity)
+                    activities, u_reject = fn_next_activity(sign_activity)
                     # 현 결재자
                     if activities[0]:
-                        # 현 결재자 대상 확인
-                        for m in activities[0]:
-                            uid = m[USER_ID]
-                            gid = m[GROUP_ID]
-                            # 사용자 정보 및 확인
-                            if uid:                                                            
-                                user = get_user(uid)
-                                user[INSTANCE_ID] = instance_id
-                            group = get_group(gid)                        
-                            # 결재자 등록
-                            sql.append(insert_signers(activities[0], group))
-                            # 결재자 프로필 등록
-                            user_lst = []
-                            user_lst.append(user)
-                            sql.append(insert_sign_users(user_lst, m))
-                            sql.append(delete_activity(m[INSTANCE_ID], m[SIGN_AREA], m[SEQ]))
-
-                        # 현 결재 프로세스 실행 후 다음 결재자 프로세스 진행
-                        if activities[1]:
-                            next_lst = fn_next_activity_format(activities[1])
-                            sql.append(insert_post_office(next_lst))
-                            sql.append(update_activity(next_lst))
-                            # 진행중인 프로세스
-                            # tasks[SIGNER_TASK_ING].append(str(instance_id))
-                        else:
-                            logging.info(f'결재완료 프로세스 진행')
-                            # tasks[SIGNER_TASK_COMPLETED].append(str(instance_id))
-                            # 완료함 사용확인
-                            boxes = json.loads(Variable.get(BOXES).replace("'","\""))
-                            # logging.info(f'boxes: {boxes}')
-                            u_completed = False
-                            for m in boxes:
-                                if m[BOX_ID] == BOX_10 and m[IS_DISPLAY] == True:
-                                    u_completed = True
-                            # 결재선
-                            signers = get_signers(instance_id)
-                            # 개인완료함
-                            if u_completed:
-                                sign_users = get_sign_users(instance_id)
-                                lst = fn_post_box_lst(sign_users[0], instance_id, BOX_10, 'U', LOCATION_DRAFT)
-                                if lst:
-                                    sql.append(insert_post_boxes(lst))
-
-                            # 품의서 || 서브 프로세스 분류
-                            areas = get_sign_areas(instance_id)
-                            area_keys = []
-                            is_sub_process = False
-                            for m in areas[0]:
-                                if m[SIGN_AREA] not in area_keys:
-                                    area_keys.append(m[SIGN_AREA])
-                                    # 기안(일반)결재 외 다른 결재가 있다면 우선 필터
-                                    if m[SIGN_AREA] != STATUS_00 and m[SIGN_AREA] != STATUS_01:
-                                        is_sub_process = True
+                        # 반려시 처리
+                        if u_reject:
+                            logging.info(f'반려 프로세스 진행')
+                            # 기 결재자 확인
+                            sign_users = get_sign_users(instance_id)
+                            sign_user_lst = sign_users[0]
                             
-                            # 품의완료함
-                            if is_sub_process == False:
-                                lst = fn_post_box_lst(signers[0], instance_id, BOX_15, 'G', LOCATION_DRAFT)
-                                if lst:
-                                    sql.append(insert_post_boxes(lst))
+                            # 대기자 결재선으로 이동
+                            act_lst = []
+                            user_lst = []
+                            for m in sign_activity[0]:
+                                uid = m[USER_ID]
+                                gid = m[GROUP_ID]
+
+                                # 그룹 정보 설정
+                                group = get_group(gid)
+                                m[GROUP_NAME] = group[NAME]
+                                m[CULTURE] = group[CULTURE]
+                                # 사용자 정보 및 확인
+                                if uid:
+                                    user = get_user(uid)
+                                    user[INSTANCE_ID] = instance_id
+                                    # 추가할 사용자 확인
+                                    m[USER_NAME] = user[NAME]
+                                    sign_user_lst.append(m)
+                                    # 사용자 프로필 정보
+                                    user[SEQ] = m[SEQ]
+                                    user[HOST_ADDRESS] = m[HOST_ADDRESS]
+                                    user[INSTANCE_ID] = m[INSTANCE_ID]
+                                    user[SIGN_AREA_ID] = m[SIGN_AREA_ID]
+                                    user[IS_COMMENT] = m[IS_COMMENT]
+                                    user[DELAY_TIME] = 0
+                                    # 이전 결재자 정보 확인
+                                    if prev_signers:
+                                        delay_time = date_diff_in_seconds(datetime.utcnow(), prev_signers_time)
+                                        user[DELAY_TIME] = delay_time
+                                    user_lst.append(user)
+                                                                        
+                                 # 결재자 등록                                
+                                act_lst.append(m)                            
+                            if act_lst:
+                                sql.append(insert_signers(act_lst))                                
+                            # 결재자 프로필 등록
+                            if user_lst:
+                                sql.append(insert_sign_users(user_lst))
+                            # 반려함 등록
+                            if sign_user_lst:
+                                lst = fn_post_box_lst(sign_user_lst, instance_id, BOX_09, 'U', LOCATION_DRAFT)
+                                sql.append(insert_post_boxes(lst))
+                            # 대기중인 결재자 모두 삭제
+                            sql.append(delete_activity_all(instance_id))
+                        else:
+                            # 현 결재자 대상 확인
+                            user_lst = []
+                            for m in activities[0]:
+                                uid = m[USER_ID]
+                                gid = m[GROUP_ID]
+                                # 사용자 정보 및 확인
+                                if uid:
+                                    user = get_user(uid)
+                                    user[INSTANCE_ID] = instance_id
+                                    m[USER_NAME] = user[NAME]
+                                    # 사용자 프로필 정보
+                                    user[SEQ] = m[SEQ]
+                                    user[HOST_ADDRESS] = m[HOST_ADDRESS]
+                                    user[INSTANCE_ID] = m[INSTANCE_ID]
+                                    user[SIGN_AREA_ID] = m[SIGN_AREA_ID]                                    
+                                    user[IS_COMMENT] = m[IS_COMMENT]
+                                    user[DELAY_TIME] = 0
+                                    # 이전 결재자 정보 확인                                    
+                                    if prev_signers:
+                                        delay_time = date_diff_in_seconds(datetime.utcnow(), prev_signers_time)
+                                        user[DELAY_TIME] = delay_time
+                                    user_lst.append(user)
+                                group = get_group(gid)
+                                m[GROUP_NAME] = group[NAME]
+                                m[CULTURE] = group[CULTURE]
+                                # 결재자 등록
+                                sql.append(insert_signers(activities[0]))
+                                # 결재자 프로필 등록
+                                sql.append(delete_activity(m[INSTANCE_ID], m[SIGN_AREA], m[SEQ]))
+                            if user_lst:
+                                sql.append(insert_sign_users(user_lst))
+                            # 현 결재 프로세스 실행 후 다음 결재자 프로세스 진행
+                            # 다음 결재자
+                            if activities[1]:
+                                next_lst = fn_next_activity_format(activities[1])
+                                sql.append(insert_post_office(next_lst))
+                                sql.append(update_activity(next_lst))
+                                # 진행중인 프로세스
+                                # tasks[SIGNER_TASK_ING].append(str(instance_id))
                             else:
-                                logging.info(f'서브 프로세스 완료처리')
-                            # 발신완료함
-                            # 수신완료함
+                                logging.info(f'완료 프로세스 진행')
+                                # tasks[SIGNER_TASK_COMPLETED].append(str(instance_id))
+                                # 완료함 사용확인
+                                boxes = json.loads(Variable.get(BOXES).replace("'","\""))
+                                # logging.info(f'boxes: {boxes}')
+                                u_completed = False
+                                for m in boxes:
+                                    if m[BOX_ID] == BOX_10 and m[IS_DISPLAY] == True:
+                                        u_completed = True
+                                # 개인완료함
+                                if u_completed:
+                                    sign_users = get_sign_users(instance_id)
+                                    lst = fn_post_box_lst(sign_users[0], instance_id, BOX_10, 'U', LOCATION_DRAFT)
+                                    if lst:
+                                        sql.append(insert_post_boxes(lst))
+
+                                # 품의서 || 서브 프로세스 분류
+                                areas = get_sign_areas(instance_id)
+                                area_keys = []
+                                is_sub_process = False
+                                for m in areas[0]:
+                                    if m[SIGN_AREA] not in area_keys:
+                                        area_keys.append(m[SIGN_AREA])
+                                        # 기안(일반)결재 외 다른 결재가 있다면 우선 필터
+                                        if m[SIGN_AREA] != STATUS_00 and m[SIGN_AREA] != STATUS_01:
+                                            is_sub_process = True
+                                
+                                # 품의완료함
+                                if is_sub_process == False:
+                                    lst = fn_post_box_lst(signers[0], instance_id, BOX_15, 'G', LOCATION_DRAFT)
+                                    if lst:
+                                        sql.append(insert_post_boxes(lst))
+                                else:
+                                    logging.info(f'서브 프로세스 완료처리')
+                                # 발신완료함
+                                # 수신완료함
 
                         sql.append(complete_workflow(workflow_process_id))
-                        # db execute
+
+                        logging.info(f'sql: {"".join(sql)}')
+
                         conn = db.get_conn()
                         cursor = conn.cursor()
                         cursor.execute(''.join(sql))
-                        cursor.close()         
+                        cursor.close()
                         conn.commit()
-
-                        logging.info(f'sql: {"".join(sql)}')
                     else:
                         logging.info(f'현 결재자 if m[SIGN_ACTION] == STATUS_01 and m[IS_EXECUTED] == True 없음')
 
@@ -181,7 +293,7 @@ class SignersOperator(BaseOperator):
                     db.run(sql, autocommit=True, parameters=[ex, BOOKMARK, workflow_process_id])
                     logging.error(f'Message: {ex}')
                 finally:
-                    logging.info(f'결재 프로세스 종료')
+                    logging.info(f'finally 결재 프로세스 종료')
                     # if (conn.is_connected()):
                     #     cursor.close()
                     #     conn.close()
@@ -248,41 +360,49 @@ def fn_next_activity(lst):
     tasks = {}
     tasks[CURRENT_ACTIVITY] = []    
     tasks[NEXT_ACTIVITY] = []
+    # 반려 확인
+    u_reject = False
     for m in lst[0]:
         # 현결재자 & 실행 프로세스 확인
         if m[SIGN_ACTION] == STATUS_01 and m[IS_EXECUTED] == True:
+            # local variable 'current' referenced before assignment
+            # 기결재
+            m[SIGN_ACTION] = STATUS_00
             current = m
             logging.info(f'현 결재자: {m}')
             tasks[CURRENT_ACTIVITY].append(m)
+            if not u_reject:
+                if m[SIGN_POSITION] == STATUS_03:
+                    u_reject = True
         # 미결재자
-        elif m[SIGN_ACTION] == STATUS_02:            
-            # 일반결재
-            if m[SIGN_AREA] == STATUS_01: 
-                # 다음 결재자의 결재영역이 같은가?
-                if current[SIGN_AREA] == m[SIGN_AREA]:
-                    if current[SEQ] + 1 == m[SEQ]:
-                        # 일반결재
-                        if m[SIGN_SECTION] == STATUS_01: 
+        elif m[SIGN_ACTION] == STATUS_02:
+            # 반려시 다음 결재 프로세스 실행 안함
+            if not u_reject:            
+                # 일반결재
+                if m[SIGN_AREA] == STATUS_01:
+                    # 다음 결재자의 결재영역이 같은가?
+                    if current[SIGN_AREA] == m[SIGN_AREA]:
+                        if current[SEQ] + 1 == m[SEQ]:
                             # 일반결재
-                            if m[SIGN_POSITION] == STATUS_01: 
+                            if m[SIGN_SECTION] == STATUS_01:
                                 tasks[NEXT_ACTIVITY].append(m)
-                        # 병렬합의
-                        elif m[SIGN_SECTION] == STATUS_02: 
-                            tasks[NEXT_ACTIVITY].append(m)
-                else:
-                    if current[SIGN_AREA_ID] + 1 == m[SIGN_AREA_ID]:
-                        # 일반결재
-                        if m[SIGN_SECTION] == STATUS_01: 
-                            # 일반결재 and 첫번째 결재
-                            if m[SIGN_POSITION] == STATUS_01 and m[SEQ] == 1: 
+                            # 병렬합의
+                            elif m[SIGN_SECTION] == STATUS_02: 
                                 tasks[NEXT_ACTIVITY].append(m)
-                        # 병렬합의
-                        elif m[SIGN_SECTION] == STATUS_02: 
-                            tasks[NEXT_ACTIVITY].append(m)
+                    else:
+                        if current[SIGN_AREA_ID] + 1 == m[SIGN_AREA_ID]:
+                            # 일반결재
+                            if m[SIGN_SECTION] == STATUS_01: 
+                                # 일반결재 and 첫번째 결재
+                                if m[SIGN_POSITION] == STATUS_01 and m[SEQ] == 1: 
+                                    tasks[NEXT_ACTIVITY].append(m)
+                            # 병렬합의
+                            elif m[SIGN_SECTION] == STATUS_02: 
+                                tasks[NEXT_ACTIVITY].append(m)
 
-            # elif m[SIGN_AREA] == STATUS_02: # 수신결재
+                # elif m[SIGN_AREA] == STATUS_02: # 수신결재
 
-    return list(tasks.values())
+    return list(tasks.values()), u_reject
 
 def fn_post_box(t, instance_id, box_id, m):
     """
@@ -295,7 +415,6 @@ def fn_post_box(t, instance_id, box_id, m):
         'participant_id': participant_id,
         'instance_id': instance_id,
         'row_version': '0x',
-
         'name': fn_sign_area_name(m[SIGN_AREA]),
         'participant_name': participant_name,
         'location': m['location']
@@ -303,7 +422,7 @@ def fn_post_box(t, instance_id, box_id, m):
 
 def fn_post_box_lst(lst, instance_id, box_id, t, location):
     """
-    결재 완료함 대상 목록
+    결재 완료함 대상 목록 - 중복키 제거 구문 포함
     """
     keys = []
     result = []
@@ -313,7 +432,7 @@ def fn_post_box_lst(lst, instance_id, box_id, t, location):
             m[LOCATION] = location
             keys.append(m[id])
             result.append(fn_post_box(t, instance_id, box_id, m))
-    return result    
+    return result
 
 def fn_sign_area_name(sign_area):
     """
@@ -584,12 +703,13 @@ def get_sign_users(instance_id):
     rows = db.get_records(''.join(sql), parameters=[instance_id])
     tasks[SIGN_USERS] = []
     for row in rows:
+        uid = row[4]
         model = {
             'instance_id':row[0],
             'sign_area_id':row[1],
             'sequence':row[2],
             'user_culture':row[3],
-            'user_id':row[4],
+            'user_id':uid,
             'user_name':row[5],
             'responsibility':row[6],
             'position':row[7],
@@ -603,19 +723,17 @@ def get_sign_users(instance_id):
         }
         tasks[SIGN_USERS].append(model)
 
-    return list(tasks.values())    
+    return list(tasks.values())
 
 ## 등록 스크립트 
-def insert_signers(lst, group):
+def insert_signers(lst):
     """
     sql:결재선 등록
     """    
     sql = []
     sql.append('insert into dapp.signers(instance_id, sign_area_id, sequence, sub_instance_id, sign_section, sign_position, sign_action, is_executed, group_culture, group_id, group_name, created_date, received_date, approved_date) values')
     index = 0
-    is_executed = 1
     sub_instance_id = 0
-    sign_action = STATUS_00 # 기결재    
     for m in lst:
         index += 1
         colon = ''
@@ -628,16 +746,16 @@ def insert_signers(lst, group):
             sub_instance_id,
             m['sign_section'],
             m['sign_position'],
-            sign_action,
-            is_executed,
-            group['culture'],
+            m[SIGN_ACTION],
+            m[IS_EXECUTED],
+            m['culture'],
             m['group_id'],
-            add_quote(group['name']),
-            datetime.now(),
-            datetime.now(),
-            datetime.now(),
+            add_quote(m[GROUP_NAME]),
+            datetime.utcnow(),
+            datetime.utcnow(),
+            datetime.utcnow(),
             colon))
-        sql.append(';')
+    sql.append(';')
     return ''.join(sql)
 
 def insert_post_office(lst):
@@ -662,7 +780,7 @@ def insert_post_office(lst):
             add_quote(m['participant_name']),
             is_viewed,
             m['location'],
-            datetime.now(),
+            datetime.utcnow(),
             colon))
         sql.append(';')
     return ''.join(sql)
@@ -689,12 +807,12 @@ def insert_post_boxes(lst):
             add_quote(m['participant_name']),
             is_viewed,
             m['location'],
-            datetime.now(),
+            datetime.utcnow(),
             colon))
     sql.append(';')
     return ''.join(sql)
 
-def insert_sign_users(lst, activity):
+def insert_sign_users(lst):
     """
     sql:결재선 사용자 등록
     """       
@@ -711,10 +829,9 @@ def insert_sign_users(lst, activity):
         m['responsibility'] = ''
         m['position'] = ''
         m['class_position'] = ''
-        if activity['host_address'] == None:
-            activity['host_address'] = ''
+        if m['host_address'] == None:
+            m['host_address'] = ''
         m['reserved_date'] = 'null'
-        m['delay_time'] = 0
         m['is_deputy'] = 0
         group_users = get_group_users(gid, uid)
         if group_users:
@@ -726,20 +843,20 @@ def insert_sign_users(lst, activity):
                 elif n['relation_type'] == 3:
                     m['class_position'] = n['group_id']
         sql.append("""({},{},'{}','{}','{}','{}','{}','{}','{}','{}',{},'{}',{},{}){}""".format(
-            activity['instance_id'],
-            activity['sign_area_id'],
-            activity['sequence'],
+            m['instance_id'],
+            m['sign_area_id'],
+            m['sequence'],
             m['culture'],
             m['user_id'],
             add_quote(m['name']),
             m['responsibility'],
             m['position'],
             m['class_position'],
-            activity['host_address'],
+            m['host_address'],
             m['reserved_date'],
             m['delay_time'],
             m['is_deputy'],
-            activity['is_comment'],
+            m['is_comment'],
             colon))
     sql.append(';')
     return ''.join(sql)
@@ -752,6 +869,14 @@ def delete_activity(instance_id, sign_area, sequence):
     sql.append('''delete from dapp.sign_activity where instance_id={} and sign_area='{}' and sequence={}'''.format(instance_id, sign_area, sequence))
     sql.append(';')
     return ''.join(sql)
+
+def delete_activity_all(instance_id):
+    """
+    sql:대기중인 결재자 모두 삭제
+    """
+    sql = []
+    sql.append('delete from dapp.sign_activity where instance_id={};'.format(instance_id))
+    return ''.join(sql)    
 
 def update_activity(lst):
     """
@@ -784,7 +909,7 @@ def complete_workflow(workflow_process_id):
     """
     sql = []
     sql.append('insert into djob.workflow_process_cmpl ')
-    sql.append("select workflow_process_id, ngen, site_id, application_id, instance_id, schema_id, name, workflow_instance_id, state, retry_count, ready, '{}' execute_date,".format(datetime.now())) 
+    sql.append("select workflow_process_id, ngen, site_id, application_id, instance_id, schema_id, name, workflow_instance_id, state, retry_count, ready, '{}' execute_date,".format(datetime.utcnow())) 
     sql.append("created_date, '{}' bookmark, version, request, reserved, message from djob.workflow_process where workflow_process_id={};".format(BOOKMARK, workflow_process_id))
     sql.append("delete from djob.workflow_process where workflow_process_id={};".format(workflow_process_id))
     return ''.join(sql)
@@ -794,3 +919,7 @@ def add_quote(value):
     sql:값 직접 등록 시 single quote 처리
     """
     return value.replace("'","\\'")
+
+def date_diff_in_seconds(dt2, dt1):
+  timedelta = dt2 - dt1
+  return timedelta.days * 24 * 3600 + timedelta.seconds
