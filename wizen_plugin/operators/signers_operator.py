@@ -166,7 +166,8 @@ class SignersOperator(BaseOperator):
                                     user[INSTANCE_ID] = instance_id
                                     # 추가할 사용자 확인
                                     m[USER_NAME] = user[NAME]
-                                    sign_user_lst.append(m)
+                                    if m[SIGN_ACTION] == STATUS_00:
+                                        sign_user_lst.append(m)
                                     # 사용자 프로필 정보
                                     user[SEQ] = m[SEQ]
                                     user[HOST_ADDRESS] = m[HOST_ADDRESS]
@@ -403,6 +404,28 @@ def fn_next_activity(lst):
                 # elif m[SIGN_AREA] == STATUS_02: # 수신결재
 
     return list(tasks.values()), u_reject
+
+def fn_sign_user(m, instance_id, prev_signers, prev_signers_time):
+    """
+    결재 사용자 프로필 정보
+    """
+    uid = m[USER_ID]
+    if uid:
+        user = get_user(uid)
+        user[INSTANCE_ID] = instance_id
+        m[USER_NAME] = user[NAME]
+        # 사용자 프로필 정보
+        user[SEQ] = m[SEQ]
+        user[HOST_ADDRESS] = m[HOST_ADDRESS]
+        user[INSTANCE_ID] = m[INSTANCE_ID]
+        user[SIGN_AREA_ID] = m[SIGN_AREA_ID]                                    
+        user[IS_COMMENT] = m[IS_COMMENT]
+        user[DELAY_TIME] = 0
+        # 이전 결재자 정보 확인                                    
+        if prev_signers:
+            delay_time = date_diff_in_seconds(datetime.utcnow(), prev_signers_time)
+            user[DELAY_TIME] = delay_time
+        return user
 
 def fn_post_box(t, instance_id, box_id, m):
     """
